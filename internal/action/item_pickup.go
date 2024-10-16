@@ -111,11 +111,15 @@ func GetItemsToPickup(maxDistance int) []data.Item {
     ctx := context.Get()
     ctx.ContextDebug.LastStep = "GetItemsToPickup"
 
+    missingHealingPotions := ctx.BeltManager.GetMissingCount(data.HealingPotion)
+    missingManaPotions := ctx.BeltManager.GetMissingCount(data.ManaPotion)
+    missingRejuvenationPotions := ctx.BeltManager.GetMissingCount(data.RejuvenationPotion)
+
     var itemsToPickup []data.Item
     _, isLevelingChar := ctx.Char.(context.LevelingCharacter)
 
     for _, itm := range ctx.Data.Inventory.ByLocation(item.LocationGround) {
-     // Skip itempickup on party leveling Maggot Lair, is too narrow and causes characters to get stuck
+	// Skip itempickup on party leveling Maggot Lair, is too narrow and causes characters to get stuck
         if isLevelingChar && !itm.IsFromQuest() && (ctx.Data.PlayerUnit.Area == area.MaggotLairLevel1 || 
             ctx.Data.PlayerUnit.Area == area.MaggotLairLevel2 || 
             ctx.Data.PlayerUnit.Area == area.MaggotLairLevel3 || 
@@ -132,16 +136,32 @@ func GetItemsToPickup(maxDistance int) []data.Item {
         }
 		// Skip items that are outside pickup radius, this is useful when clearing big areas
         itemDistance := ctx.PathFinder.DistanceFromMe(itm.Position)
-        if maxDistance > 0 && itemDistance > maxDistance {
+        if maxDistance > 0 && itemDistance > maxDistance && itm.IsPotion() {
             continue
         }
 
-        if shouldBePickedUp(itm) {
+        if itm.IsPotion() {
+            if (itm.IsHealingPotion() && missingHealingPotions > 0) ||
+               (itm.IsManaPotion() && missingManaPotions > 0) ||
+               (itm.IsRejuvPotion() && missingRejuvenationPotions > 0) {
+                if shouldBePickedUp(itm) {
+                    itemsToPickup = append(itemsToPickup, itm)
+                    switch {
+                    case itm.IsHealingPotion():
+                        missingHealingPotions--
+                    case itm.IsManaPotion():
+                        missingManaPotions--
+                    case itm.IsRejuvPotion():
+                        missingRejuvenationPotions--
+                    }
+                }
+            }
+        } else if shouldBePickedUp(itm) {
             itemsToPickup = append(itemsToPickup, itm)
         }
     }
 
-    // Remove blacklisted items from the list, we don't want to pick them up
+     // Remove blacklisted items from the list, we don't want to pick them up
     filteredItems := make([]data.Item, 0, len(itemsToPickup))
     for _, itm := range itemsToPickup {
         isBlacklisted := false
