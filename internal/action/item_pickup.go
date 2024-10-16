@@ -108,15 +108,17 @@ func ItemPickup(maxDistance int) error {
 }
 
 func GetItemsToPickup(maxDistance int) []data.Item {
-	ctx := context.Get()
-	ctx.ContextDebug.LastStep = "GetItemsToPickup"
+    ctx := context.Get()
+    ctx.ContextDebug.LastStep = "GetItemsToPickup"
 
-	missingHealingPotions := ctx.BeltManager.GetMissingCount(data.HealingPotion)
-	missingManaPotions := ctx.BeltManager.GetMissingCount(data.ManaPotion)
-	missingRejuvenationPotions := ctx.BeltManager.GetMissingCount(data.RejuvenationPotion)
-	var itemsToPickup []data.Item
-	_, isLevelingChar := ctx.Char.(context.LevelingCharacter)
-	for _, itm := range ctx.Data.Inventory.ByLocation(item.LocationGround) {
+    missingHealingPotions := ctx.BeltManager.GetMissingCount(data.HealingPotion)
+    missingManaPotions := ctx.BeltManager.GetMissingCount(data.ManaPotion)
+    missingRejuvenationPotions := ctx.BeltManager.GetMissingCount(data.RejuvenationPotion)
+
+    var itemsToPickup []data.Item
+    _, isLevelingChar := ctx.Char.(context.LevelingCharacter)
+
+    for _, itm := range ctx.Data.Inventory.ByLocation(item.LocationGround) {
 		// Skip itempickup on party leveling Maggot Lair, is too narrow and causes characters to get stuck
 		if isLevelingChar && !itm.IsFromQuest() && (ctx.Data.PlayerUnit.Area == area.MaggotLairLevel1 || ctx.Data.PlayerUnit.Area == area.MaggotLairLevel2 || ctx.Data.PlayerUnit.Area == area.MaggotLairLevel3 || ctx.Data.PlayerUnit.Area == area.ArcaneSanctuary) {
 			continue
@@ -129,50 +131,47 @@ func GetItemsToPickup(maxDistance int) []data.Item {
 			itm.IsPotion() {
 			continue
 		}
+		
+		// Skip items that are outside pickup radius, this is useful when clearing big areas
+        itemDistance := ctx.PathFinder.DistanceFromMe(itm.Position)
+        if maxDistance > 0 && itemDistance > maxDistance {
+            continue
+        }
 
-		// Skip items that are outside pickup radius, this is useful when clearing big areas to prevent
-		// character going back to pickup potions all the time after using them
-		itemDistance := ctx.PathFinder.DistanceFromMe(itm.Position)
-		if maxDistance > 0 && itemDistance > maxDistance && itm.IsPotion() {
-			continue
-		}
+        if itm.IsPotion() {
+            switch {
+            case itm.IsHealingPotion() && missingHealingPotions > 0:
+                itemsToPickup = append(itemsToPickup, itm)
+                missingHealingPotions--
+            case itm.IsManaPotion() && missingManaPotions > 0:
+                itemsToPickup = append(itemsToPickup, itm)
+                missingManaPotions--
+            case itm.IsRejuvPotion() && missingRejuvenationPotions > 0:
+                itemsToPickup = append(itemsToPickup, itm)
+                missingRejuvenationPotions--
+            }
+        } else if shouldBePickedUp(itm) {
+            itemsToPickup = append(itemsToPickup, itm)
+        }
+    }
 
-		if !shouldBePickedUp(itm) {
-			continue
-		}
-
-		// Pickup potions only if they are required
-		if itm.IsHealingPotion() && missingHealingPotions > 0 {
-			itemsToPickup = append(itemsToPickup, itm)
-			missingHealingPotions--
-			continue
-		}
-		if itm.IsManaPotion() && missingManaPotions > 0 {
-			itemsToPickup = append(itemsToPickup, itm)
-			missingManaPotions--
-			continue
-		}
-		if itm.IsRejuvPotion() && missingRejuvenationPotions > 0 {
-			itemsToPickup = append(itemsToPickup, itm)
-			missingRejuvenationPotions--
-			continue
-		}
-
-		if !itm.IsPotion() {
-			itemsToPickup = append(itemsToPickup, itm)
-		}
-	}
-
+    filteredItems := make([]data.Item, 0, len(itemsToPickup))
+	
 	// Remove blacklisted items from the list, we don't want to pick them up
-	for i, itm := range itemsToPickup {
-		for _, k := range ctx.CurrentGame.BlacklistedItems {
-			if itm.UnitID == k.UnitID {
-				itemsToPickup = append(itemsToPickup[:i], itemsToPickup[i+1:]...)
-			}
-		}
-	}
+    for _, itm := range itemsToPickup {
+        isBlacklisted := false
+        for _, blacklistedItem := range ctx.CurrentGame.BlacklistedItems {
+            if itm.UnitID == blacklistedItem.UnitID {
+                isBlacklisted = true
+                break
+            }
+        }
+        if !isBlacklisted {
+            filteredItems = append(filteredItems, itm)
+        }
+    }
 
-	return itemsToPickup
+    return filteredItems
 }
 
 func shouldBePickedUp(i data.Item) bool {
