@@ -107,7 +107,7 @@ func ItemPickup(maxDistance int) error {
 	}
 }
 
-unc GetItemsToPickup(maxDistance int) []data.Item {
+func GetItemsToPickup(maxDistance int) []data.Item {
     ctx := context.Get()
     ctx.ContextDebug.LastStep = "GetItemsToPickup"
 
