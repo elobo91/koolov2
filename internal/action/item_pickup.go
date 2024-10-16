@@ -176,64 +176,80 @@ func GetItemsToPickup(maxDistance int) []data.Item {
 }
 
 func shouldBePickedUp(i data.Item) bool {
-	ctx := context.Get()
-	ctx.ContextDebug.LastStep = "shouldBePickedUp"
+    ctx := context.Get()
+    ctx.ContextDebug.LastStep = "shouldBePickedUp"
 
-	if i.IsRuneword {
-		return true
-	}
+    // Always pickup Runewords and Wirt's Leg
+    if i.IsRuneword || i.Name == "WirtsLeg" {
+        return true
+    }
 
-	// Skip picking up gold if we can not carry more
-	gold, _ := ctx.Data.PlayerUnit.FindStat(stat.Gold, 0)
-	if gold.Value >= ctx.Data.PlayerUnit.MaxGold() && i.Name == "Gold" {
-		ctx.Logger.Debug("Skipping gold pickup, inventory full")
-		return false
-	}
+    // Skip picking up gold if we can not carry more
+    if i.Name == "Gold" {
+        gold, _ := ctx.Data.PlayerUnit.FindStat(stat.Gold, 0)
+        if gold.Value >= ctx.Data.PlayerUnit.MaxGold() {
+            ctx.Logger.Debug("Skipping gold pickup, inventory full")
+            return false
+        }
+        return true
+    }
 
-	// Always pickup WirtsLeg!
-	if i.Name == "WirtsLeg" {
-		return true
-	}
+    // Handle potion pickup
+    if i.IsPotion() {
+        // Skip potion pickup for Berserker Barb in Travincal if configured
+        if ctx.CharacterCfg.Character.Class == "berserker" &&
+            ctx.CharacterCfg.Character.BerserkerBarb.SkipPotionPickupInTravincal &&
+            ctx.Data.PlayerUnit.Area == area.Travincal {
+            return false
+        }
 
-	// Pick up quest items if we're in leveling or questing run
-	specialRuns := slices.Contains(ctx.CharacterCfg.Game.Runs, "quests") || slices.Contains(ctx.CharacterCfg.Game.Runs, "leveling")
-	switch i.Name {
-	case "Scrollofinifuss", "LamEsensTome", "HoradricCube", "AmuletoftheViper", "StaffofKings", "HoradricStaff", "AJadeFigurine", "KhalimsEye", "KhalimsBrain", "KhalimsHeart", "KhalimsFlail":
-		if specialRuns {
-			return true
-		}
-	}
+        // Check if we need this type of potion
+        switch {
+        case i.IsHealingPotion():
+            return ctx.BeltManager.GetMissingCount(data.HealingPotion) > 0
+        case i.IsManaPotion():
+            return ctx.BeltManager.GetMissingCount(data.ManaPotion) > 0
+        case i.IsRejuvPotion():
+            return ctx.BeltManager.GetMissingCount(data.RejuvenationPotion) > 0
+        }
+        return false
+    }
 
-	// Book of Skill doesnt work by name, so we find it by ID
-	if i.ID == 552 {
-		return true
-	}
+    // Pick up quest items if we're in leveling or questing run
+    specialRuns := slices.Contains(ctx.CharacterCfg.Game.Runs, "quests") || slices.Contains(ctx.CharacterCfg.Game.Runs, "leveling")
+    if specialRuns {
+        switch i.Name {
+        case "Scrollofinifuss", "LamEsensTome", "HoradricCube", "AmuletoftheViper", "StaffofKings", "HoradricStaff", "AJadeFigurine", "KhalimsEye", "KhalimsBrain", "KhalimsHeart", "KhalimsFlail":
+            return true
+        }
+    }
+	
+    if i.ID == 552 { // Book of Skill
+        return true
+    }
 
 	// Only during leveling if gold amount is low pickup items to sell as junk
-	_, isLevelingChar := ctx.Char.(context.LevelingCharacter)
-
-	// Skip picking up gold, usually early game there are small amounts of gold in many places full of enemies, better
+    _, isLevelingChar := ctx.Char.(context.LevelingCharacter)
+	
+	 // Skip picking up gold, usually early game there are small amounts of gold in many places full of enemies, better
 	// stay away of that
-	if isLevelingChar && ctx.Data.PlayerUnit.TotalPlayerGold() < 50000 && i.Name != "Gold" {
+  	if isLevelingChar && ctx.Data.PlayerUnit.TotalPlayerGold() < 50000 && i.Name != "Gold" {
 		return true
 	}
 
-	minGoldPickupThreshold := ctx.CharacterCfg.Game.MinGoldPickupThreshold
 	// Pickup all magic or superior items if total gold is low, filter will not pass and items will be sold to vendor
-	if ctx.Data.PlayerUnit.TotalPlayerGold() < minGoldPickupThreshold && i.Quality >= item.QualityMagic {
-		return true
-	}
+    minGoldPickupThreshold := ctx.CharacterCfg.Game.MinGoldPickupThreshold
+    if ctx.Data.PlayerUnit.TotalPlayerGold() < minGoldPickupThreshold && i.Quality >= item.QualityMagic {
+        return true
+    }
 
-	matchedRule, result := ctx.Data.CharacterCfg.Runtime.Rules.EvaluateAll(i)
-	if result == nip.RuleResultNoMatch {
-		return false
-	}
-
-	if result == nip.RuleResultPartial {
-		return true
-	}
-
-	exceedQuantity := doesExceedQuantity(matchedRule)
-
-	return !exceedQuantity
+    // Evaluate item based on NIP rules
+    matchedRule, result := ctx.Data.CharacterCfg.Runtime.Rules.EvaluateAll(i)
+    if result == nip.RuleResultNoMatch {
+        return false
+    }
+    if result == nip.RuleResultPartial {
+        return true
+    }
+    return !doesExceedQuantity(matchedRule)
 }
